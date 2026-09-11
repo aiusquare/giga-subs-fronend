@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 240" fill="none">
+  <!-- Icon mark: GigaLinks stylized "G" -->
+  <!-- Dark-blue outer G body -->
+  <path
+    d="M100 18
+       C58 18 24 52 24 94
+       C24 136 58 170 100 170
+       L140 170
+       L140 150
+       L100 150
+       C70 150 46 126 46 94
+       C46 62 70 38 100 38
+       L145 38
+       L145 18
+       Z"
+    fill="#1E1FD8"
+  />
+  <!-- Dark-blue right crossbar of G -->
+  <rect x="108" y="96" width="32" height="22" rx="4" fill="#1E1FD8"/>
+  <!-- Teal right arm (the distinctive G terminal) -->
+  <path
+    d="M148 18
+       L148 92
+       L140 92
+       L140 38
+       L148 38
+       Z"
+    fill="#00B4C5"
+  />
+  <path
+    d="M148 92
+       L148 172
+       C148 172 172 172 172 148
+       L172 92
+       Z"
+    fill="#00B4C5"
+  />
+
+  <!-- Wordmark: "Giga" in dark blue -->
+  <text
+    x="100" y="204"
+    text-anchor="middle"
+    font-family="'Plus Jakarta Sans', Arial, sans-serif"
+    font-weight="800"
+    font-size="38"
+    fill="#1E1FD8"
+    letter-spacing="-1"
+  >Giga</text>
+
+  <!-- Wordmark: "Links" in teal -->
+  <text
+    x="100" y="236"
+    text-anchor="middle"
+    font-family="'Plus Jakarta Sans', Arial, sans-serif"
+    font-weight="700"
+    font-size="30"
+    fill="#00B4C5"
+    letter-spacing="2"
+  >Links</text>
+</svg>
