@@ -636,72 +636,6 @@ export function AdminApiSettings() {
         </Button>
       </div>
 
-      <Card className="border-primary/20">
-        <CardContent className="flex flex-col gap-4 pt-6 lg:flex-row lg:items-end">
-          <div className="flex-1">
-            <p className="text-sm font-semibold">Live API routing</p>
-            <p className="text-xs text-muted-foreground">
-              Switch the active provider instantly. Its saved credentials and
-              matching pricelist will be used for new requests.
-            </p>
-          </div>
-          <div className="grid w-full max-w-[520px] gap-3 sm:grid-cols-2 lg:shrink-0">
-            <div className="space-y-1.5">
-              <Label>Service</Label>
-              <Select value={routingService} onValueChange={setRoutingService}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {serviceTypes.map((service) => (
-                    <SelectItem key={service.id} value={service.id}>
-                      {service.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>Active API</Label>
-              <Select
-                value={activeRoutingProvider?.id}
-                onValueChange={handleRoutingProviderChange}
-                disabled={!routingProviderOptions.length || switchingApi}
-              >
-                <SelectTrigger>
-                  <SelectValue
-                    placeholder={
-                      routingProviderOptions.length
-                        ? "Select active API"
-                        : "No API configured"
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {routingProviderOptions.map((provider) => {
-                    return (
-                      <SelectItem key={provider.id} value={provider.id}>
-                        {provider.name}
-                        {provider.isActive
-                          ? " - Active"
-                          : provider.credentialsReady
-                            ? ""
-                            : provider.isConfigured
-                              ? " - Credentials required"
-                              : " - Setup required"}
-                      </SelectItem>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          {switchingApi && (
-            <Loader2 className="h-5 w-5 animate-spin text-primary" />
-          )}
-        </CardContent>
-      </Card>
 
       <Card>
         <CardContent className="space-y-4 pt-6">
@@ -1121,3 +1055,4 @@ export function AdminApiSettings() {
     </div>
   );
 }
+
