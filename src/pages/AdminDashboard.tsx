@@ -19,6 +19,7 @@ import { AdminTickets } from "@/components/admin/AdminTickets";
 import { AdminRebrand } from "@/components/admin/AdminRebrand";
 import { AdminMigrations } from "@/components/admin/AdminMigrations";
 import { AdminIdentityUpdates } from "@/components/admin/AdminIdentityUpdates";
+import { AdminProviderRouting } from "@/components/admin/AdminProviderRouting";
 import { ShieldX } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -65,6 +66,8 @@ const AdminDashboard = () => {
         return <AdminServices />;
       case "pricing":
         return <AdminPricing />;
+      case "routing-failover":
+        return <AdminProviderRouting />;
       case "promotions":
         return <AdminPromotions />;
       case "notifications":
@@ -105,6 +108,8 @@ const AdminDashboard = () => {
         return "Services Management";
       case "pricing":
         return "Service Pricing";
+      case "routing-failover":
+        return "Routing & Failover";
       case "promotions":
         return "Promotions";
       case "notifications":

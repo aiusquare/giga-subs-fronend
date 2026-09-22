@@ -18,6 +18,7 @@ import {
   Ticket,
   RefreshCw,
   Fingerprint,
+  Route,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -32,6 +33,7 @@ const sidebarItems = [
   { icon: BarChart3, label: "Analytics", id: "analytics" },
   { icon: Package, label: "Services", id: "services" },
   { icon: DollarSign, label: "Pricing", id: "pricing" },
+  { icon: Route, label: "Routing & Failover", id: "routing-failover" },
   { icon: Ticket, label: "Support Tickets", id: "tickets" },
   { icon: Megaphone, label: "Promotions", id: "promotions" },
   { icon: Bell, label: "Notifications", id: "notifications" },

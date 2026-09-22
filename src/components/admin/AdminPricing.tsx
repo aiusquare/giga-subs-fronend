@@ -60,11 +60,51 @@ interface PricingItem {
   plan_name: string;
   plan_code: string | null;
   plan_category: string;
+  service_product_id: string | null;
+  canonical_mapping_status: "resolved" | "unresolved";
   cost_price: number;
   selling_price: number;
   is_active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+interface ProviderProductMapping {
+  id: string;
+  provider_config_id: string;
+  provider_name: string;
+  provider_plan_code: string;
+  cost_price: number;
+  expected_margin: number;
+  expected_margin_percent: number | null;
+  is_active: boolean;
+}
+
+interface CanonicalProduct {
+  id: string;
+  product_key: string;
+  service_type: string;
+  network_biller: string;
+  plan_category: string;
+  display_name: string;
+  selling_price: number;
+  is_active: boolean;
+  provider_mappings: ProviderProductMapping[];
+}
+
+interface LegacyMappingReport {
+  legacy_pricing_id: string;
+  plan_name: string;
+  api_provider: string;
+  provider_plan_code: string | null;
+  suggested_service_product_id: string | null;
+  suggested_product_key: string | null;
+  mapping_status:
+    | "resolved"
+    | "suggested_requires_confirmation"
+    | "ambiguous"
+    | "unconfirmed"
+    | "unresolved";
 }
 
 type ImportMode = "upsert" | "add_only" | "update_only";
@@ -251,6 +291,29 @@ function downloadCsv(filename: string, rows: unknown[][]) {
 export function AdminPricing() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [pricing, setPricing] = useState<PricingItem[]>([]);
+  const [canonicalProducts, setCanonicalProducts] = useState<
+    CanonicalProduct[]
+  >([]);
+  const [legacyMappingReport, setLegacyMappingReport] = useState<
+    LegacyMappingReport[]
+  >([]);
+  const [canonicalDialogOpen, setCanonicalDialogOpen] = useState(false);
+  const [mappingProduct, setMappingProduct] = useState<CanonicalProduct | null>(
+    null,
+  );
+  const [canonicalForm, setCanonicalForm] = useState({
+    product_key: "",
+    service_type: "data",
+    network_biller: "",
+    plan_category: "SME",
+    display_name: "",
+    selling_price: 0,
+  });
+  const [mappingForm, setMappingForm] = useState({
+    provider_config_id: "",
+    provider_plan_code: "",
+    cost_price: 0,
+  });
   const [apiProviderConfigs, setApiProviderConfigs] = useState<
     ApiProviderConfig[]
   >([]);
@@ -295,12 +358,17 @@ export function AdminPricing() {
   const fetchPricing = async () => {
     setLoading(true);
     try {
-      const [prices, providerConfigs] = await Promise.all([
-        api.get<PricingItem[]>("/admin/pricing"),
-        api.get<ApiProviderConfig[]>("/admin/providers"),
-      ]);
+      const [prices, providerConfigs, products, mappingReport] =
+        await Promise.all([
+          api.get<PricingItem[]>("/admin/pricing"),
+          api.get<ApiProviderConfig[]>("/admin/providers"),
+          api.get<CanonicalProduct[]>("/admin/products"),
+          api.get<LegacyMappingReport[]>("/admin/products/migration-report"),
+        ]);
       setPricing(prices);
       setApiProviderConfigs(providerConfigs);
+      setCanonicalProducts(products);
+      setLegacyMappingReport(mappingReport);
     } catch (err: unknown) {
       toast.error("Failed to fetch pricing data");
       console.error(err);
@@ -312,6 +380,79 @@ export function AdminPricing() {
   useEffect(() => {
     fetchPricing();
   }, []);
+
+  const createCanonicalProduct = async () => {
+    if (
+      !canonicalForm.product_key ||
+      !canonicalForm.network_biller ||
+      !canonicalForm.display_name
+    ) {
+      toast.error("Product key, network/biller, and display name are required");
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.post("/admin/products", { ...canonicalForm, is_active: true });
+      setCanonicalDialogOpen(false);
+      await fetchPricing();
+      toast.success("Canonical customer product created");
+    } catch (error: unknown) {
+      toast.error(
+        error instanceof Error ? error.message : "Product creation failed",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const createProviderMapping = async () => {
+    if (
+      !mappingProduct ||
+      !mappingForm.provider_config_id ||
+      !mappingForm.provider_plan_code
+    ) {
+      toast.error("Provider and provider plan code are required");
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.post(`/admin/products/${mappingProduct.id}/mappings`, {
+        ...mappingForm,
+        is_active: true,
+      });
+      setMappingProduct(null);
+      await fetchPricing();
+      toast.success("Provider mapping created");
+    } catch (error: unknown) {
+      toast.error(
+        error instanceof Error ? error.message : "Mapping creation failed",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const confirmLegacyLink = async (row: LegacyMappingReport) => {
+    if (!row.suggested_service_product_id) return;
+    setSaving(true);
+    try {
+      await api.post(
+        `/admin/products/${row.suggested_service_product_id}/legacy-links`,
+        {
+          legacy_pricing_id: row.legacy_pricing_id,
+          confirm: true,
+        },
+      );
+      await fetchPricing();
+      toast.success(`${row.plan_name} linked to ${row.suggested_product_key}`);
+    } catch (error: unknown) {
+      toast.error(
+        error instanceof Error ? error.message : "Legacy link failed",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -824,10 +965,13 @@ export function AdminPricing() {
       <Card className="border-primary/20">
         <CardContent className="flex flex-col gap-4 pt-6 lg:flex-row lg:items-end">
           <div className="flex-1">
-            <p className="text-sm font-semibold">Live API routing</p>
+            <p className="text-sm font-semibold">
+              Legacy current production routing
+            </p>
             <p className="text-xs text-muted-foreground">
-              Switching an API immediately exposes only that API's active
-              pricelist to customers and purchase requests.
+              This selector remains for the existing production path only. The
+              new Routing &amp; Failover interface is shadow-only and does not
+              execute purchases.
             </p>
           </div>
           <div className="grid w-full max-w-[520px] gap-3 sm:grid-cols-2 lg:shrink-0">
@@ -878,6 +1022,389 @@ export function AdminPricing() {
           )}
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-start justify-between gap-4">
+          <div>
+            <CardTitle className="text-base">
+              Canonical Customer Products
+            </CardTitle>
+            <CardDescription>
+              Customer prices are fixed here. Each provider mapping owns only
+              its upstream code and cost.{" "}
+              {
+                legacyMappingReport.filter(
+                  (row) => row.mapping_status === "unresolved",
+                ).length
+              }{" "}
+              legacy rows remain unresolved
+              {legacyMappingReport.some(
+                (row) => row.mapping_status === "ambiguous",
+              )
+                ? "; ambiguous rows require explicit confirmation"
+                : ""}
+              .
+            </CardDescription>
+          </div>
+          <Button
+            size="sm"
+            className="shrink-0 gap-2"
+            onClick={() => setCanonicalDialogOpen(true)}
+          >
+            <Plus className="h-4 w-4" /> Customer Product
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="flex items-center justify-center py-6">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : canonicalProducts.length === 0 ? (
+            <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+              No canonical products have been created. Legacy pricing remains
+              purchasable until rows are explicitly linked.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Customer Product</TableHead>
+                    <TableHead>Service</TableHead>
+                    <TableHead>Network / Biller</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead className="text-right">Selling Price</TableHead>
+                    <TableHead>Provider Mappings</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {canonicalProducts.map((product) => (
+                    <TableRow key={product.id}>
+                      <TableCell>
+                        <div className="font-medium">
+                          {product.display_name}
+                        </div>
+                        <code className="text-xs text-muted-foreground">
+                          {product.product_key}
+                        </code>
+                      </TableCell>
+                      <TableCell className="capitalize">
+                        {serviceTypeLabels[product.service_type] ||
+                          product.service_type.replace(/_/g, " ")}
+                      </TableCell>
+                      <TableCell>{product.network_biller}</TableCell>
+                      <TableCell>{product.plan_category}</TableCell>
+                      <TableCell className="text-right font-medium">
+                        ₦{product.selling_price.toLocaleString()}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex min-w-[280px] flex-wrap items-center gap-1.5">
+                          {product.provider_mappings.length === 0 ? (
+                            <Badge variant="destructive">Missing mapping</Badge>
+                          ) : (
+                            product.provider_mappings.map((mapping) => (
+                              <Badge
+                                key={mapping.id}
+                                variant={
+                                  mapping.is_active ? "secondary" : "outline"
+                                }
+                                className={
+                                  !mapping.is_active ? "opacity-60" : ""
+                                }
+                              >
+                                {mapping.provider_name} →{" "}
+                                {mapping.provider_plan_code} · ₦
+                                {mapping.cost_price.toLocaleString()} · margin ₦
+                                {mapping.expected_margin.toLocaleString()}
+                                {!mapping.is_active ? " · inactive" : ""}
+                              </Badge>
+                            ))
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-2 text-xs"
+                            onClick={() => {
+                              setMappingProduct(product);
+                              setMappingForm({
+                                provider_config_id: "",
+                                provider_plan_code: "",
+                                cost_price: 0,
+                              });
+                            }}
+                          >
+                            <Plus className="mr-1 h-3 w-3" /> Mapping
+                          </Button>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={product.is_active ? "default" : "outline"}
+                        >
+                          {product.is_active ? "Active" : "Inactive"}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          {legacyMappingReport.some(
+            (row) => row.mapping_status === "suggested_requires_confirmation",
+          ) && (
+            <div className="mt-5 space-y-2 border-t pt-4">
+              <p className="text-sm font-medium">
+                Exact legacy link suggestions
+              </p>
+              <p className="text-xs text-muted-foreground">
+                These match service, network/biller, category, and price
+                exactly. Each still requires explicit confirmation.
+              </p>
+              {legacyMappingReport
+                .filter(
+                  (row) =>
+                    row.mapping_status === "suggested_requires_confirmation",
+                )
+                .slice(0, 10)
+                .map((row) => (
+                  <div
+                    key={row.legacy_pricing_id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-sm"
+                  >
+                    <span>
+                      {row.plan_name}{" "}
+                      <span className="text-muted-foreground">
+                        ({row.api_provider}:{" "}
+                        {row.provider_plan_code || "no code"})
+                      </span>
+                      {" → "}
+                      <code>{row.suggested_product_key}</code>
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={saving}
+                      onClick={() => confirmLegacyLink(row)}
+                    >
+                      Confirm link
+                    </Button>
+                  </div>
+                ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={canonicalDialogOpen} onOpenChange={setCanonicalDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New Customer Product</DialogTitle>
+            <DialogDescription>
+              The selling price is customer-facing and remains constant across
+              provider mappings.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2 sm:col-span-2">
+              <Label>Stable product key</Label>
+              <Input
+                value={canonicalForm.product_key}
+                placeholder="DATA_MTN_SME_1GB"
+                onChange={(e) =>
+                  setCanonicalForm({
+                    ...canonicalForm,
+                    product_key: e.target.value.toUpperCase(),
+                  })
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Service</Label>
+              <Select
+                value={canonicalForm.service_type}
+                onValueChange={(value) =>
+                  setCanonicalForm({ ...canonicalForm, service_type: value })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {serviceTypes.map((service) => (
+                    <SelectItem key={service.id} value={service.id}>
+                      {service.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Network / Biller</Label>
+              <Input
+                value={canonicalForm.network_biller}
+                onChange={(e) =>
+                  setCanonicalForm({
+                    ...canonicalForm,
+                    network_biller: e.target.value,
+                  })
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Category</Label>
+              <Select
+                value={canonicalForm.plan_category}
+                onValueChange={(value) =>
+                  setCanonicalForm({ ...canonicalForm, plan_category: value })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {planCategories.map((category) => (
+                    <SelectItem key={category.id} value={category.id}>
+                      {category.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Selling price</Label>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={canonicalForm.selling_price || ""}
+                onChange={(e) =>
+                  setCanonicalForm({
+                    ...canonicalForm,
+                    selling_price: Number(e.target.value),
+                  })
+                }
+              />
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label>Display name</Label>
+              <Input
+                value={canonicalForm.display_name}
+                placeholder="MTN 1GB SME"
+                onChange={(e) =>
+                  setCanonicalForm({
+                    ...canonicalForm,
+                    display_name: e.target.value,
+                  })
+                }
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setCanonicalDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button disabled={saving} onClick={createCanonicalProduct}>
+              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Create product
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={mappingProduct !== null}
+        onOpenChange={(open) => !open && setMappingProduct(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Provider Mapping</DialogTitle>
+            <DialogDescription>
+              {mappingProduct?.display_name}: enter only the selected provider's
+              exact upstream code and cost.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Provider</Label>
+              <Select
+                value={mappingForm.provider_config_id}
+                onValueChange={(value) =>
+                  setMappingForm({ ...mappingForm, provider_config_id: value })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select configured provider" />
+                </SelectTrigger>
+                <SelectContent>
+                  {apiProviderConfigs
+                    .filter(
+                      (config) =>
+                        config.service_type === mappingProduct?.service_type &&
+                        !mappingProduct?.provider_mappings.some(
+                          (mapping) => mapping.provider_config_id === config.id,
+                        ),
+                    )
+                    .map((config) => (
+                      <SelectItem key={config.id} value={config.id}>
+                        {config.name}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Provider plan code</Label>
+              <Input
+                value={mappingForm.provider_plan_code}
+                onChange={(e) =>
+                  setMappingForm({
+                    ...mappingForm,
+                    provider_plan_code: e.target.value,
+                  })
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Provider cost</Label>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={mappingForm.cost_price || ""}
+                onChange={(e) =>
+                  setMappingForm({
+                    ...mappingForm,
+                    cost_price: Number(e.target.value),
+                  })
+                }
+              />
+            </div>
+            {mappingProduct && (
+              <p className="text-sm text-muted-foreground">
+                Expected margin: ₦
+                {(
+                  mappingProduct.selling_price - mappingForm.cost_price
+                ).toLocaleString()}
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMappingProduct(null)}>
+              Cancel
+            </Button>
+            <Button disabled={saving} onClick={createProviderMapping}>
+              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Create mapping
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Filters */}
       <Card>
@@ -1043,6 +1570,7 @@ export function AdminPricing() {
                     <TableHead>Plan</TableHead>
                     <TableHead>Category</TableHead>
                     <TableHead>Code</TableHead>
+                    <TableHead>Canonical</TableHead>
                     <TableHead className="text-right">Cost (₦)</TableHead>
                     <TableHead className="text-right">Price (₦)</TableHead>
                     <TableHead className="text-right">Profit (₦)</TableHead>
@@ -1086,6 +1614,15 @@ export function AdminPricing() {
                         </TableCell>
                         <TableCell className="text-muted-foreground">
                           {item.plan_code || "-"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={
+                              item.service_product_id ? "secondary" : "outline"
+                            }
+                          >
+                            {item.service_product_id ? "Linked" : "Legacy"}
+                          </Badge>
                         </TableCell>
                         <TableCell className="text-right">
                           {item.cost_price.toLocaleString()}
